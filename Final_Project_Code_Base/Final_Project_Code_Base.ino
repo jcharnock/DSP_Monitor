@@ -331,7 +331,7 @@ float IIR_Middle(float xv)
   //  ***  Copy variable declarations from MATLAB generator to here  ****
 
 //Filter specific variable declarations
-const int numStages = 1;
+const int numStages = 5;
 static float G[numStages];
 static float b[numStages][3];
 static float a[numStages][3];
@@ -350,10 +350,22 @@ static float a[numStages][3];
 
 //  ***  Copy variable initialization code from MATLAB generator to here  ****
 
-// BWRTH LOW, order 2, 20 BPM
-G[0] = 0.0095258;
-b[0][0] = 1.0000000; b[0][1] = 2.0000000; b[0][2]= 1.0000000;
-a[0][0] = 1.0000000; a[0][1] =  -1.7055521; a[0][2] =  0.7436552;
+//CHEBY bandpass, order 5, R= 0.5, [12 40] BPM
+G[0] = 0.1005883;
+b[0][0] = 1.0000000; b[0][1] = -0.0007646; b[0][2]= -0.9996017;
+a[0][0] = 1.0000000; a[0][1] =  -1.7797494; a[0][2] =  0.8889605;
+G[1] = 0.1005883;
+b[1][0] = 1.0000000; b[1][1] = 2.0009417; b[1][2]= 1.0009420;
+a[1][0] = 1.0000000; a[1][1] =  -1.8483239; a[1][2] =  0.8984289;
+G[2] = 0.1005883;
+b[2][0] = 1.0000000; b[2][1] = 1.9996397; b[2][2]= 0.9996400;
+a[2][0] = 1.0000000; a[2][1] =  -1.9241024; a[2][2] =  0.9473605;
+G[3] = 0.1005883;
+b[3][0] = 1.0000000; b[3][1] = -1.9997055; b[3][2]= 0.9997056;
+a[3][0] = 1.0000000; a[3][1] =  -1.7805039; a[3][2] =  0.9515924;
+G[4] = 0.1005883;
+b[4][0] = 1.0000000; b[4][1] = -2.0001113; b[4][2]= 1.0001113;
+a[4][0] = 1.0000000; a[4][1] =  -1.9696093; a[4][2] =  0.9850367;
 
 //  **** Stop copying MATLAB code here  ****
   
