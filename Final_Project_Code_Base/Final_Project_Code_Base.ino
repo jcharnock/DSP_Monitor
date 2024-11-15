@@ -103,18 +103,18 @@ void loop()
   //  (use DATA_FXPT).  Then round the value and truncate to a fixed point
   //  INT datatype
 
-  //fxdInputValue = long(DATA_FXPT * readValue + 0.5);
+  fxdInputValue = long(DATA_FXPT * readValue + 0.5);
 
   
 
   //  Execute the equalizer
-  //  eqOutput = EqualizerFIR( fxdInputValue, loopTick );
+  eqOutput = EqualizerFIR( fxdInputValue, loopTick );
   
   //  Execute the noise filter.  
-  // eqOutput = NoiseFilter( eqOutput, loopTick );
+  eqOutput = NoiseFilter( eqOutput, loopTick );
 
   //  Convert the output of the equalizer by scaling floating point
-  //xv = float(eqOutput) * INV_FXPT;
+  xv = float(eqOutput) * INV_FXPT;
 
 
   //*******************************************************************
@@ -123,7 +123,9 @@ void loop()
 
   // ******************************************************************
   //  Compute the output of the filter using the cascaded SOS sections
-   yv = IIR_Generic(xv); // second order systems cascade  
+   yvLow = IIR_Low(xv); // second order systems cascade  
+   yvMid = IIR_Mid(xv);
+   yvHigh = IIR_High(xv);
 
 
 
@@ -132,9 +134,17 @@ void loop()
   //  Pass the entire set of output values, the latest stats structure and the reset flag
 
   
-  //  statsReset = (statsLF.tick%100 == 0);
-  //  getStats( yv, statsLF, statsReset);
-  //  stdLF = statsLF.stdev;
+  statsReset = (statsLF.tick%100 == 0);
+  getStats( yvLow, statsLF, statsReset);
+  stdLF = statsLF.stdev;
+
+  statsReset = (statsMF.tick%100 == 0);
+  getStats( yvMid, statsMF, statsReset);
+  stdMF = statsMF.stdev;
+
+  statsReset = (statsHF.tick%100 == 0);
+  getStats( yvHigh, statsHF, statsReset);
+  stdHF = statsHF.stdev;
 
 
   //*******************************************************************
@@ -208,9 +218,7 @@ int FIR_Generic(long inputX, int sampleNumber)
   //
   const int HFXPT = 1, MFILT = 4;
   
-  int h[] = {};
-
-
+  int h[] = {1, 1, -1, -1};
  
   int i;
   const float INV_HFXPT = 1.0/HFXPT;
@@ -253,7 +261,7 @@ int FIR_Generic(long inputX, int sampleNumber)
 
 
 //*******************************************************************************
-float IIR_Generic(float xv)
+float IIR_Low(float xv)
 {  
 
 
@@ -314,6 +322,100 @@ a[0][0] = 1.0000000; a[0][1] =  -1.7055521; a[0][2] =  0.7436552;
   
   return yv;
 }
+
+//*******************************************************************************
+float IIR_Middle(float xv)
+{  
+
+
+  //  ***  Copy variable declarations from MATLAB generator to here  ****
+
+//Filter specific variable declarations
+const int numStages = 1;
+static float G[numStages];
+static float b[numStages][3];
+static float a[numStages][3];
+
+//  *** Stop copying MATLAB variable declarations here
+  
+  int stage;
+  int i;
+  static float xM0[numStages] = {0.0}, xM1[numStages] = {0.0}, xM2[numStages] = {0.0};
+  static float yM0[numStages] = {0.0}, yM1[numStages] = {0.0}, yM2[numStages] = {0.0};
+  
+  float yv = 0.0;
+  unsigned long startTime;
+
+
+
+//  ***  Copy variable initialization code from MATLAB generator to here  ****
+
+// BWRTH LOW, order 2, 20 BPM
+G[0] = 0.0095258;
+b[0][0] = 1.0000000; b[0][1] = 2.0000000; b[0][2]= 1.0000000;
+a[0][0] = 1.0000000; a[0][1] =  -1.7055521; a[0][2] =  0.7436552;
+
+//  **** Stop copying MATLAB code here  ****
+  
+  for (i =0; i<numStages; i++)
+    {
+      yM2[i] = yM1[i]; yM1[i] = yM0[i];  xM2[i] = xM1[i]; xM1[i] = xM0[i], xM0[i] = G[i]*xv;
+      yv = -a[i][2]*yM2[i] - a[i][1]*yM1[i] + b[i][2]*xM2[i] + b[i][1]*xM1[i] + b[i][0]*xM0[i];
+      yM0[i] = yv;
+      xv = yv;
+    }
+//
+//  execUsec += micros()-startTime;
+  
+  return yv;
+}
+
+//*******************************************************************************
+float IIR_High(float xv)
+{  
+
+  //  ***  Copy variable declarations from MATLAB generator to here  ****
+
+//Filter specific variable declarations
+const int numStages = 1;
+static float G[numStages];
+static float b[numStages][3];
+static float a[numStages][3];
+
+//  *** Stop copying MATLAB variable declarations here
+  
+  int stage;
+  int i;
+  static float xM0[numStages] = {0.0}, xM1[numStages] = {0.0}, xM2[numStages] = {0.0};
+  static float yM0[numStages] = {0.0}, yM1[numStages] = {0.0}, yM2[numStages] = {0.0};
+  
+  float yv = 0.0;
+  unsigned long startTime;
+
+
+//  ***  Copy variable initialization code from MATLAB generator to here  ****
+
+// BWRTH LOW, order 2, 20 BPM
+G[0] = 0.0095258;
+b[0][0] = 1.0000000; b[0][1] = 2.0000000; b[0][2]= 1.0000000;
+a[0][0] = 1.0000000; a[0][1] =  -1.7055521; a[0][2] =  0.7436552;
+
+//  **** Stop copying MATLAB code here  ****
+  
+  for (i =0; i<numStages; i++)
+    {
+      yM2[i] = yM1[i]; yM1[i] = yM0[i];  xM2[i] = xM1[i]; xM1[i] = xM0[i], xM0[i] = G[i]*xv;
+      yv = -a[i][2]*yM2[i] - a[i][1]*yM1[i] + b[i][2]*xM2[i] + b[i][1]*xM1[i] + b[i][0]*xM0[i];
+      yM0[i] = yv;
+      xv = yv;
+    }
+//
+//  execUsec += micros()-startTime;
+  
+  return yv;
+}
+
+
 
 //*******************************************************************
 void getStats(float xv, stats_t &s, bool reset)
