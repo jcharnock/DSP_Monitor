@@ -13,11 +13,32 @@
 
 
 const int TSAMP_MSEC = 100;
-const int NUM_SAMPLES = 900;  // 3600;
+const int NUM_SAMPLES = 3600;  // 3600;
 const int NUM_SUBSAMPLES = 160;
 const int DAC0 = 3, DAC1 = 4, DAC2 = 5, LM61 = A0, VDITH = A1;
 const int V_REF = 5.0;
 const int SPKR = 12; // d12  PB4
+
+// MFILT is the kernel length.  Must be an odd number
+const int MFILT = 31; // MFILT points from 0...MFILT-1
+
+// FC_BPM is the corner frequency of the filter in breaths per minute
+// MOD_BPM is not used
+const int FC_BPM = 70, MOD_BPM = 0;
+
+//FC is the normalized corner frequency.  Normalized to the sample rate
+const float FC = FC_BPM/600.0; // fs = 10 Hz -> 600 bpm
+
+//FM is the normalized MOD frequency.  Normalized to the sample rate
+const float FM = MOD_BPM/600.0;
+
+//HFXPT is the scale value to convert to a fixed point kernel
+const long HFXPT = 10000;
+
+
+//  Storage for the kernel values
+int h[MFILT] = {0};
+int hFilt[MFILT] = {0};
 
 volatile boolean sampleFlag = false;
 
@@ -82,11 +103,11 @@ void loop()
   // ******************************************************************
   //  When finding the impulse responses of the filters use this as an input
   //  Create a Delta function in time with the first sample a 1 and all others 0
-  xv = (loopTick == 0) ? 1.0 : 0.0; // impulse test input
+  //xv = (loopTick == 0) ? 1.0 : 0.0; // impulse test input
 
   // ******************************************************************
   //  Use this when the test vector generator is used as an input
-  //  xv = testVector();
+    xv = testVector();
 
 
   // ******************************************************************
@@ -103,18 +124,16 @@ void loop()
   //  (use DATA_FXPT).  Then round the value and truncate to a fixed point
   //  INT datatype
 
-  //fxdInputValue = long(DATA_FXPT * readValue + 0.5);
-
-  
+  fxdInputValue = long(DATA_FXPT * readValue + 0.5);
 
   //  Execute the equalizer
-  //  eqOutput = EqualizerFIR( fxdInputValue, loopTick );
+  //eqOutput = EqualizerFIR( fxdInputValue, loopTick );
   
   //  Execute the noise filter.  
-  // eqOutput = NoiseFilter( eqOutput, loopTick );
+//  eqOutput = NoiseFilter( eqOutput, loopTick );
 
   //  Convert the output of the equalizer by scaling floating point
-  //xv = float(eqOutput) * INV_FXPT;
+  xv = float(eqOutput) * INV_FXPT;
 
 
   //*******************************************************************
@@ -123,18 +142,25 @@ void loop()
 
   // ******************************************************************
   //  Compute the output of the filter using the cascaded SOS sections
-   yv = IIR_Generic(xv); // second order systems cascade  
-
-
-
+   yLF = IIR_Low(xv); // second order systems cascade  
+   yMF = IIR_Middle(xv);
+   yHF = IIR_High(xv);
 
   //  Compute the latest output of the running stats for the output of the filters.
   //  Pass the entire set of output values, the latest stats structure and the reset flag
 
   
-  //  statsReset = (statsLF.tick%100 == 0);
-  //  getStats( yv, statsLF, statsReset);
-  //  stdLF = statsLF.stdev;
+  statsReset = (statsLF.tick%100 == 0);
+  getStats( yLF, statsLF, statsReset);
+  stdLF = statsLF.stdev;
+
+  statsReset = (statsMF.tick%100 == 0);
+  getStats( yMF, statsMF, statsReset);
+  stdMF = statsMF.stdev;
+
+  statsReset = (statsHF.tick%100 == 0);
+  getStats( yHF, statsHF, statsReset);
+  stdHF = statsHF.stdev;
 
 
   //*******************************************************************
@@ -179,7 +205,75 @@ void loop()
 
 } // loop()
 
-//******************************************************************
+//******************************************************************* Noise Filter
+void NoiseFilter(float Fc, int h[])
+//
+// This function computes a Windowed SINC lowpass filter.
+//  
+//  The code operates by first building a floating point 
+//  version of the filter and while doing so summing
+//  all the kernel values.  Then the filter is created again
+//  using floating point numbers, but the floating point values are
+//  converted to fixed point at the end by dividing by the sum
+//  of the kernel values to set the filter gain to 1.0 and then
+//  scaling by HFXPT to convert the numbers to fixed point.
+//
+//  Windowed Sinc Lowpass Filter Kernel, M odd
+{
+ 
+  float hv, accumRaw = 0.0;
+
+  // This part of the code builds the filter once and finds the filter gain
+  //
+  //  Iterate from i = 0 to MFILT-1.  MFILT/2 is the center point
+   
+  for (int i=0; i < MFILT; i++)
+  {
+
+    //  hv is the argument of the SINC function.  See Page 285 in Smith
+    //  It is a function of the normalized corner frequency of the filter.
+     
+    hv = TWO_PI*Fc*(i-MFILT/2);
+
+    // if the point is the center point then the argument hv will be 0 and
+    // dividing by zero is a problem, so correct for this point.  In the limit
+    // sin(0)/0 will be 1.0 so set the point to 1.0
+    
+    if (i == (MFILT/2)) hv = 1.0; // L'Hopital point repair for the center point
+
+    // Otherwise compute SINC normally.  SINC(hv) = sin(hv)/hv
+    
+    else hv = sin(hv)/hv;
+
+    //  Now compute the value of the Hamming Window a this point and
+    //  multiply the kernel value by this window value
+    
+    hv *= 0.54-0.46*cos(TWO_PI*i/(MFILT-1)); 
+
+    //  Add upt the values of each point in the kernel to find the gain
+    //  of the filter.  This will be used later to scale the kernel values
+    
+    accumRaw += hv; // floating point sinc DC gain normalizer
+  }
+
+  //  Now build the filter again, but scale each value in the kernel by the gain
+  //  and the value of HFXPT and convert the values to fixed point.  See comments above
+  //  to determine what each line below is doing.
+  
+  for (int i=0; i < MFILT; i++)
+  {
+    hv = TWO_PI*Fc*(i-MFILT/2);
+    if (i == (MFILT/2)) hv = 1.0; // L'Hopital point repair
+    else hv = sin(hv)/hv; // sinc
+    hv *= 0.54-0.46*cos(TWO_PI*i/(MFILT-1)); // window
+
+    //  Normalize by the filter gain and scale for fixed point
+    
+    h[i] = int(HFXPT*hv/accumRaw + ((hv > 0.0) ? 0.5 : -0.5)); // round, fix point
+  }
+}
+
+//****************************************************************** Alarm Check
 int AlarmCheck( float stdLF, float stdMF, float stdHF)
 {
 
@@ -190,81 +284,59 @@ int AlarmCheck( float stdLF, float stdMF, float stdHF)
 //return alarmCode;
 
 }  // end AlarmCheck
- 
 
 
-//*******************************************************************
-int FIR_Generic(long inputX, int sampleNumber)
-{   
-  // Starting with a generic FIR filter impelementation customize only by
-  // changing the length of the filter using MFILT and the values of the
-  // impulse response in h
 
-  // Filter type: FIR
-  
-  //
-  //  Set the constant HFXPT to the sum of the values of the impulse response
-  //  This is to keep the gain of the impulse response at 1.
-  //
-  const int HFXPT = 1, MFILT = 4;
-  
-  int h[] = {};
+//****************************************************************** Equalizer for Input
 
-
- 
-  int i;
-  const float INV_HFXPT = 1.0/HFXPT;
-  static long xN[MFILT] = {inputX}; 
-  long yOutput = 0;
-
-  //
-  // Right shift old xN values. Assign new inputX to xN[0];
-  //
-  for ( i = (MFILT-1); i > 0; i-- )
-  {
-    xN[i] = xN[i-1];
-  }
-   xN[0] = inputX;
-  
-  //
-  // Convolve the input sequence with the impulse response
-  //
-  
-  for ( i = 0; i < MFILT; i++)
-  {
-    
-    // Explicitly cast the impulse value and the input value to LONGs then multiply
-    // by the input value.  Sum up the output values
-    
-    yOutput = yOutput + long(h[i]) * long( xN[i] );
-  }
-
-  //  Return the output, but scale by 1/HFXPT to keep the gain to 1
-  //  Then cast back to an integer
-  //
-
-  // Skip the first MFILT  samples to avoid the transient at the beginning due to end effects
-  if (sampleNumber < MFILT ){
-    return long(0);
-  }else{
-    return long(float(yOutput) * INV_HFXPT);
-  }
-}
-
+//long EqualizerFIR(long xInput )
+//{
+//
+//  int i;
+//  long yN=0; //  Current output
+//  const int equalizerLength = 4;
+//  static long xN[equalizerLength] = {0};
+//  long h[] = {1, 1, -1, -1};  // Impulse response of the equalizer
+//
+//  //  Update the xN array
+//
+//  for ( i = equalizerLength-1 ; i >= 1; i-- )
+//  {
+//    xN[i] = xN[i - 1];
+//  }
+//
+//  xN[0] = xInput;
+//
+//  //  Convolve the input with the impulse response
+//
+//  for ( i = 0; i <= equalizerLength-1 ; i++)
+//  {
+//    yN += h[i] * xN[i];
+//  }
+//
+//  if (tick < equalizerLength)
+//  {
+//    return 0;
+//  }
+//  else
+//  {
+//   return yN;
+//  }
+//
+//}
 
 //*******************************************************************************
-float IIR_Generic(float xv)
+float IIR_Low(float xv)
 {  
 
 
   //  ***  Copy variable declarations from MATLAB generator to here  ****
 
 //Filter specific variable declarations
-const int numStages = 1;
+const int numStages = 3;
 static float G[numStages];
 static float b[numStages][3];
 static float a[numStages][3];
-
 //  *** Stop copying MATLAB variable declarations here
   
   int stage;
@@ -279,11 +351,18 @@ static float a[numStages][3];
 
 //  ***  Copy variable initialization code from MATLAB generator to here  ****
 
-// BWRTH LOW, order 2, 20 BPM
-const int MFILT = 3;
-  static float GAIN = 0.0103419;
-  static float b[] = {0.5000000, 1.0000000, 0.5000000};
-  static float a[] = {1.0000000, -1.8143721, 0.8362815};
+//CHEBY low, order 5, R = 0.5, 12 BPM
+
+G[0] = 0.0054630;
+b[0][0] = 1.0000000; b[0][1] = 0.9990472; b[0][2]= 0.0000000;
+a[0][0] = 1.0000000; a[0][1] =  -0.9554256; a[0][2] =  0.0000000;
+G[1] = 0.0054630;
+b[1][0] = 1.0000000; b[1][1] = 2.0015407; b[1][2]= 1.0015416;
+a[1][0] = 1.0000000; a[1][1] =  -1.9217194; a[1][2] =  0.9289864;
+G[2] = 0.0054630;
+b[2][0] = 1.0000000; b[2][1] = 1.9994122; b[2][2]= 0.9994131;
+a[2][0] = 1.0000000; a[2][1] =  -1.9562202; a[2][2] =  0.9723269;
+
 
 //  **** Stop copying MATLAB code here  ****
 
@@ -315,6 +394,119 @@ const int MFILT = 3;
   
   return yv;
 }
+
+//*******************************************************************************
+float IIR_Middle(float xv)
+{  
+
+
+  //  ***  Copy variable declarations from MATLAB generator to here  ****
+
+//Filter specific variable declarations
+const int numStages = 5;
+static float G[numStages];
+static float b[numStages][3];
+static float a[numStages][3];
+
+//  *** Stop copying MATLAB variable declarations here
+  
+  int stage;
+  int i;
+  static float xM0[numStages] = {0.0}, xM1[numStages] = {0.0}, xM2[numStages] = {0.0};
+  static float yM0[numStages] = {0.0}, yM1[numStages] = {0.0}, yM2[numStages] = {0.0};
+  
+  float yv = 0.0;
+  unsigned long startTime;
+
+
+
+//  ***  Copy variable initialization code from MATLAB generator to here  ****
+
+//CHEBY bandpass, order 5, R= 0.5, [12 40] BPM
+G[0] = 0.1005883;
+b[0][0] = 1.0000000; b[0][1] = -0.0007646; b[0][2]= -0.9996017;
+a[0][0] = 1.0000000; a[0][1] =  -1.7797494; a[0][2] =  0.8889605;
+G[1] = 0.1005883;
+b[1][0] = 1.0000000; b[1][1] = 2.0009417; b[1][2]= 1.0009420;
+a[1][0] = 1.0000000; a[1][1] =  -1.8483239; a[1][2] =  0.8984289;
+G[2] = 0.1005883;
+b[2][0] = 1.0000000; b[2][1] = 1.9996397; b[2][2]= 0.9996400;
+a[2][0] = 1.0000000; a[2][1] =  -1.9241024; a[2][2] =  0.9473605;
+G[3] = 0.1005883;
+b[3][0] = 1.0000000; b[3][1] = -1.9997055; b[3][2]= 0.9997056;
+a[3][0] = 1.0000000; a[3][1] =  -1.7805039; a[3][2] =  0.9515924;
+G[4] = 0.1005883;
+b[4][0] = 1.0000000; b[4][1] = -2.0001113; b[4][2]= 1.0001113;
+a[4][0] = 1.0000000; a[4][1] =  -1.9696093; a[4][2] =  0.9850367;
+
+//  **** Stop copying MATLAB code here  ****
+  
+  for (i =0; i<numStages; i++)
+    {
+      yM2[i] = yM1[i]; yM1[i] = yM0[i];  xM2[i] = xM1[i]; xM1[i] = xM0[i], xM0[i] = G[i]*xv;
+      yv = -a[i][2]*yM2[i] - a[i][1]*yM1[i] + b[i][2]*xM2[i] + b[i][1]*xM1[i] + b[i][0]*xM0[i];
+      yM0[i] = yv;
+      xv = yv;
+    }
+//
+//  execUsec += micros()-startTime;
+  
+  return yv;
+}
+
+//*******************************************************************************
+float IIR_High(float xv)
+{  
+
+  //  ***  Copy variable declarations from MATLAB generator to here  ****
+
+//Filter specific variable declarations
+const int numStages = 3;
+static float G[numStages];
+static float b[numStages][3];
+static float a[numStages][3];
+
+//  *** Stop copying MATLAB variable declarations here
+  
+  int stage;
+  int i;
+  static float xM0[numStages] = {0.0}, xM1[numStages] = {0.0}, xM2[numStages] = {0.0};
+  static float yM0[numStages] = {0.0}, yM1[numStages] = {0.0}, yM2[numStages] = {0.0};
+  
+  float yv = 0.0;
+  unsigned long startTime;
+
+
+//  ***  Copy variable initialization code from MATLAB generator to here  ****
+
+//CHEBY high, order 5, R = 0.5, 40 BPM
+
+G[0] = 0.7527548;
+b[0][0] = 1.0000000; b[0][1] = -1.0012325; b[0][2]= 0.0000000;
+a[0][0] = 1.0000000; a[0][1] =  -0.2605136; a[0][2] =  0.0000000;
+G[1] = 0.7527548;
+b[1][0] = 1.0000000; b[1][1] = -1.9980085; b[1][2]= 0.9980100;
+a[1][0] = 1.0000000; a[1][1] =  -1.3350294; a[1][2] =  0.6145423;
+G[2] = 0.7527548;
+b[2][0] = 1.0000000; b[2][1] = -2.0007590; b[2][2]= 1.0007605;
+a[2][0] = 1.0000000; a[2][1] =  -1.7555162; a[2][2] =  0.9156503;
+
+//  **** Stop copying MATLAB code here  ****
+  
+  for (i =0; i<numStages; i++)
+    {
+      yM2[i] = yM1[i]; yM1[i] = yM0[i];  xM2[i] = xM1[i]; xM1[i] = xM0[i], xM0[i] = G[i]*xv;
+      yv = -a[i][2]*yM2[i] - a[i][1]*yM1[i] + b[i][2]*xM2[i] + b[i][1]*xM1[i] + b[i][0]*xM0[i];
+      yM0[i] = yv;
+      xv = yv;
+    }
+//
+//  execUsec += micros()-startTime;
+  
+  return yv;
+}
+
+
 
 //*******************************************************************
 void getStats(float xv, stats_t &s, bool reset)
