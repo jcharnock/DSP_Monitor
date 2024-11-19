@@ -19,27 +19,6 @@ const int DAC0 = 3, DAC1 = 4, DAC2 = 5, LM61 = A0, VDITH = A1;
 const int V_REF = 5.0;
 const int SPKR = 12; // d12  PB4
 
-// MFILT is the kernel length.  Must be an odd number
-const int MFILT = 31; // MFILT points from 0...MFILT-1
-
-// FC_BPM is the corner frequency of the filter in breaths per minute
-// MOD_BPM is not used
-const int FC_BPM = 70, MOD_BPM = 0;
-
-//FC is the normalized corner frequency.  Normalized to the sample rate
-const float FC = FC_BPM/600.0; // fs = 10 Hz -> 600 bpm
-
-//FM is the normalized MOD frequency.  Normalized to the sample rate
-const float FM = MOD_BPM/600.0;
-
-//HFXPT is the scale value to convert to a fixed point kernel
-const long HFXPT = 10000;
-
-
-//  Storage for the kernel values
-int h[MFILT] = {0};
-int hFilt[MFILT] = {0};
-
 volatile boolean sampleFlag = false;
 
 const long DATA_FXPT = 1000; // Scale value to convert from float to fixed
@@ -205,6 +184,91 @@ void loop()
 
 } // loop()
 
+
+
+//****************************************************************** Alarm Check
+int AlarmCheck( float stdLF, float stdMF, float stdHF)
+{
+
+  /* if (values are all 0 aka the code isnt fuckin running && alarm.isPlaying != true){
+   *    alarm.stop() // stop any existing sound
+   *    alarm.play(sound for failing);
+   *  }
+   *  
+   *  else if ((stdLF < less than value for 12 BPM) || (stdHF > greater than value for 40 BPM)){
+   *    alarm.stop() // stop any existing sound
+   *    alarm.play(sound for low / high breathing value);
+   *  }
+   *  else{
+   *    alarm.stop()
+   *  }
+   * 
+   */
+   
+
+
+//return alarmCode;
+
+}  // end AlarmCheck
+
+
+
+//******************************************************************* Equalizer Filter
+int EqualizerFIR(long inputX, int sampleNumber)
+{   
+  // Starting with a generic FIR filter impelementation customize only by
+  // changing the length of the filter using MFILT and the values of the
+  // impulse response in h
+
+  // Filter type: FIR
+  
+  //
+  //  Set the constant HFXPT to the sum of the values of the impulse response
+  //  This is to keep the gain of the impulse response at 1.
+  //
+  const int HFXPT = 1, MFILT = 4;
+  
+  int h[] = {1, 1, -1, -1};
+
+  int i;
+  const float INV_HFXPT = 1.0/HFXPT;
+  static long xN[MFILT] = {inputX}; 
+  long yOutput = 0;
+
+  //
+  // Right shift old xN values. Assign new inputX to xN[0];
+  //
+  for ( i = (MFILT-1); i > 0; i-- )
+  {
+    xN[i] = xN[i-1];
+  }
+   xN[0] = inputX;
+  
+  //
+  // Convolve the input sequence with the impulse response
+  //
+  
+  for ( i = 0; i < MFILT; i++)
+  {
+    
+    // Explicitly cast the impulse value and the input value to LONGs then multiply
+    // by the input value.  Sum up the output values
+    
+    yOutput = yOutput + long(h[i]) * long( xN[i] );
+  }
+
+  //  Return the output, but scale by 1/HFXPT to keep the gain to 1
+  //  Then cast back to an integer
+  //
+
+  // Skip the first MFILT  samples to avoid the transient at the beginning due to end effects
+  if (sampleNumber < MFILT ){
+    return long(0);
+  }else{
+    return long(float(yOutput) * INV_HFXPT);
+  }
+}
+
 //******************************************************************* Noise Filter
 void NoiseFilter(float Fc, int h[])
 //
@@ -220,6 +284,22 @@ void NoiseFilter(float Fc, int h[])
 //
 //  Windowed Sinc Lowpass Filter Kernel, M odd
 {
+
+  // MFILT is the kernel length.  Must be an odd number
+  int MFILT = 31; // MFILT points from 0...MFILT-1
+
+  // FC_BPM is the corner frequency of the filter in breaths per minute
+  // MOD_BPM is not used
+  int FC_BPM = 70, MOD_BPM = 0;
+
+  //FC is the normalized corner frequency.  Normalized to the sample rate
+  float FC = FC_BPM/600.0; // fs = 10 Hz -> 600 bpm
+
+  //FM is the normalized MOD frequency.  Normalized to the sample rate
+  float FM = MOD_BPM/600.0;
+
+  //HFXPT is the scale value to convert to a fixed point kernel
+  long HFXPT = 10000;
  
   float hv, accumRaw = 0.0;
 
@@ -271,57 +351,6 @@ void NoiseFilter(float Fc, int h[])
     
     h[i] = int(HFXPT*hv/accumRaw + ((hv > 0.0) ? 0.5 : -0.5)); // round, fix point
   }
-}
-
-//****************************************************************** Alarm Check
-int AlarmCheck( float stdLF, float stdMF, float stdHF)
-{
-
-
-//  Your alarm check logic code will go here.
-
-  
-//return alarmCode;
-
-}  // end AlarmCheck
-
-
-
-//****************************************************************** Equalizer for Input
-long EqualizerFIR(long xInput )
-{
-
-  int i;
-  long yN=0; //  Current output
-  const int equalizerLength = 4;
-  static long xN[equalizerLength] = {0};
-  long h[] = {1, 1, -1, -1};  // Impulse response of the equalizer
-
-  //  Update the xN array
-
-  for ( i = equalizerLength-1 ; i >= 1; i-- )
-  {
-    xN[i] = xN[i - 1];
-  }
-
-  xN[0] = xInput;
-
-  //  Convolve the input with the impulse response
-
-  for ( i = 0; i <= equalizerLength-1 ; i++)
-  {
-    yN += h[i] * xN[i];
-  }
-
-  if (tick < equalizerLength)
-  {
-    return 0;
-  }
-  else
-  {
-   return yN;
-  }
-
 }
 
 //*******************************************************************************
@@ -553,6 +582,7 @@ void setAlarm(int aCode, boolean isToneEn)
 
 // Your alarm code goes here
 
+// set the tone volume and sound here with Tone2 library
     
 } // setBreathRateAlarm()
 
