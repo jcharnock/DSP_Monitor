@@ -109,10 +109,10 @@ void loop()
   eqOutput = EqualizerFIR( fxdInputValue, loopTick );
   
   //  Execute the noise filter.  
-  noiseOutput = NoiseFilter( eqOutput, loopTick );
+  //noiseOutput = NoiseFilter( eqOutput, loopTick );
 
   //  Convert the output of the equalizer by scaling floating point
-  xv = float(noiseOutput) * INV_FXPT;
+  xv = float(eqOutput) * INV_FXPT;
 
 
   //*******************************************************************
@@ -272,7 +272,7 @@ int EqualizerFIR(long inputX, int sampleNumber)
 }
 
 //******************************************************************* Noise Filter
-int NoiseFilter(float xv)
+int NoiseFilter(long inputX, int sampleNumber){
 
   // LPF FIR Filter Coefficients MFILT = 101, Fc = 70
   const int HFXPT = 4096, MFILT = 101;
@@ -284,7 +284,44 @@ int NoiseFilter(float xv)
   39, 13, -15, -31, -29, -14, 5, 19, 21, 13, 0, -10, -14, -10,
   -2, 5, 9, 7, 3, -2, -5, -5, -3, 0, 2, 3, 2, 0,
   -1, -2, -2};
+  int i;
+  const float INV_HFXPT = 1.0/HFXPT;
+  static long xN[MFILT] = {inputX}; 
+  long yOutput = 0;
+
+  //
+  // Right shift old xN values. Assign new inputX to xN[0];
+  //
+  for ( i = (MFILT-1); i > 0; i-- )
+  {
+    xN[i] = xN[i-1];
+  }
+   xN[0] = inputX;
   
+  //
+  // Convolve the input sequence with the impulse response
+  //
+  
+  for ( i = 0; i < MFILT; i++)
+  {
+    
+    // Explicitly cast the impulse value and the input value to LONGs then multiply
+    // by the input value.  Sum up the output values
+    
+    yOutput = yOutput + long(h[i]) * long( xN[i] );
+  }
+
+  //  Return the output, but scale by 1/HFXPT to keep the gain to 1
+  //  Then cast back to an integer
+  //
+
+  // Skip the first MFILT  samples to avoid the transient at the beginning due to end effects
+  if (sampleNumber < MFILT ){
+    return long(0);
+  }
+  else{
+    return long(float(yOutput) * INV_HFXPT);
+  }
 }
 
 //*******************************************************************************
