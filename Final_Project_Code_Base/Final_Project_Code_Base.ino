@@ -75,18 +75,18 @@ void loop()
 
   float readValue, floatOutput;  //  Input data from ADC after dither averaging or from MATLAB
   long fxdInputValue, lpfInput, lpfOutput;  
-  long eqOutput;  //  Equalizer output
+  long eqOutput, noiseOutput;  //  Equalizer output
   int alarmCode;  //  Alarm code
 
 
   // ******************************************************************
   //  When finding the impulse responses of the filters use this as an input
   //  Create a Delta function in time with the first sample a 1 and all others 0
-  xv = (loopTick == 0) ? 1.0 : 0.0; // impulse test input
+  // xv = (loopTick == 0) ? 1.0 : 0.0; // impulse test input
 
   // ******************************************************************
   //  Use this when the test vector generator is used as an input
-  //  xv = testVector();
+  xv = testVector();
 
 
   // ******************************************************************
@@ -109,10 +109,10 @@ void loop()
   eqOutput = EqualizerFIR( fxdInputValue, loopTick );
   
   //  Execute the noise filter.  
-  eqOutput = NoiseFilter( eqOutput, loopTick );
+  noiseOutput = NoiseFilter( eqOutput, loopTick );
 
   //  Convert the output of the equalizer by scaling floating point
-  xv = float(eqOutput) * INV_FXPT;
+  xv = float(noiseOutput) * INV_FXPT;
 
 
   //*******************************************************************
@@ -195,15 +195,17 @@ int AlarmCheck( float stdLF, float stdMF, float stdHF)
    *    alarm.play(sound for failing);
    *  }
    *  
-   *  else if ((stdLF < less than value for 12 BPM) || (stdHF > greater than value for 40 BPM)){
+   *  else if (stdLF < less than value for 12 BPM) {
    *    alarm.stop() // stop any existing sound
    *    alarm.play(sound for low / high breathing value);
+   *  }
+   *  else if (stdHF > greater than value for 40 BPM){
+   *  
    *  }
    *  else{
    *    alarm.stop()
    *  }
-   * 
-   */
+  */
    
 
 
@@ -270,87 +272,19 @@ int EqualizerFIR(long inputX, int sampleNumber)
 }
 
 //******************************************************************* Noise Filter
-void NoiseFilter(float Fc, int h[])
-//
-// This function computes a Windowed SINC lowpass filter.
-//  
-//  The code operates by first building a floating point 
-//  version of the filter and while doing so summing
-//  all the kernel values.  Then the filter is created again
-//  using floating point numbers, but the floating point values are
-//  converted to fixed point at the end by dividing by the sum
-//  of the kernel values to set the filter gain to 1.0 and then
-//  scaling by HFXPT to convert the numbers to fixed point.
-//
-//  Windowed Sinc Lowpass Filter Kernel, M odd
-{
+int NoiseFilter(float xv)
 
-  // MFILT is the kernel length.  Must be an odd number
-  int MFILT = 31; // MFILT points from 0...MFILT-1
-
-  // FC_BPM is the corner frequency of the filter in breaths per minute
-  // MOD_BPM is not used
-  int FC_BPM = 70, MOD_BPM = 0;
-
-  //FC is the normalized corner frequency.  Normalized to the sample rate
-  float FC = FC_BPM/600.0; // fs = 10 Hz -> 600 bpm
-
-  //FM is the normalized MOD frequency.  Normalized to the sample rate
-  float FM = MOD_BPM/600.0;
-
-  //HFXPT is the scale value to convert to a fixed point kernel
-  long HFXPT = 10000;
- 
-  float hv, accumRaw = 0.0;
-
-  // This part of the code builds the filter once and finds the filter gain
-  //
-  //  Iterate from i = 0 to MFILT-1.  MFILT/2 is the center point
-   
-  for (int i=0; i < MFILT; i++)
-  {
-
-    //  hv is the argument of the SINC function.  See Page 285 in Smith
-    //  It is a function of the normalized corner frequency of the filter.
-     
-    hv = TWO_PI*Fc*(i-MFILT/2);
-
-    // if the point is the center point then the argument hv will be 0 and
-    // dividing by zero is a problem, so correct for this point.  In the limit
-    // sin(0)/0 will be 1.0 so set the point to 1.0
-    
-    if (i == (MFILT/2)) hv = 1.0; // L'Hopital point repair for the center point
-
-    // Otherwise compute SINC normally.  SINC(hv) = sin(hv)/hv
-    
-    else hv = sin(hv)/hv;
-
-    //  Now compute the value of the Hamming Window a this point and
-    //  multiply the kernel value by this window value
-    
-    hv *= 0.54-0.46*cos(TWO_PI*i/(MFILT-1)); 
-
-    //  Add upt the values of each point in the kernel to find the gain
-    //  of the filter.  This will be used later to scale the kernel values
-    
-    accumRaw += hv; // floating point sinc DC gain normalizer
-  }
-
-  //  Now build the filter again, but scale each value in the kernel by the gain
-  //  and the value of HFXPT and convert the values to fixed point.  See comments above
-  //  to determine what each line below is doing.
+  // LPF FIR Filter Coefficients MFILT = 101, Fc = 70
+  const int HFXPT = 4096, MFILT = 101;
+  int h[] = {-2, -2, -1, 0, 2, 3, 2, 0, -3, -5, -5, -2, 3, 7,
+  9, 5, -2, -10, -14, -10, 0, 13, 21, 19, 5, -14, -29, -31,
+  -15, 13, 39, 48, 31, -6, -48, -71, -58, -9, 56, 104, 103, 42,
+  -63, -163, -200, -128, 67, 349, 647, 873, 957, 873, 647, 349, 67, -128,
+  -200, -163, -63, 42, 103, 104, 56, -9, -58, -71, -48, -6, 31, 48,
+  39, 13, -15, -31, -29, -14, 5, 19, 21, 13, 0, -10, -14, -10,
+  -2, 5, 9, 7, 3, -2, -5, -5, -3, 0, 2, 3, 2, 0,
+  -1, -2, -2};
   
-  for (int i=0; i < MFILT; i++)
-  {
-    hv = TWO_PI*Fc*(i-MFILT/2);
-    if (i == (MFILT/2)) hv = 1.0; // L'Hopital point repair
-    else hv = sin(hv)/hv; // sinc
-    hv *= 0.54-0.46*cos(TWO_PI*i/(MFILT-1)); // window
-
-    //  Normalize by the filter gain and scale for fixed point
-    
-    h[i] = int(HFXPT*hv/accumRaw + ((hv > 0.0) ? 0.5 : -0.5)); // round, fix point
-  }
 }
 
 //*******************************************************************************
