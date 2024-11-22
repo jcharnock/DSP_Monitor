@@ -10,6 +10,7 @@
 
 #include <MsTimer2.h>
 #include <SPI.h>
+#include <Tone2.h>
 
 
 const int TSAMP_MSEC = 100;
@@ -30,6 +31,7 @@ int nSmpl = 1, sample;
 float xv, yv, yLF, yMF, yHF, stdLF, stdMF, stdHF;
 float printArray[9];
 int numValues = 0;
+Tone alarm;
 
 
 int loopTick = 0;
@@ -109,7 +111,7 @@ void loop()
   eqOutput = EqualizerFIR( fxdInputValue, loopTick );
   
   //  Execute the noise filter.  
-  //noiseOutput = NoiseFilter( eqOutput, loopTick );
+  noiseOutput = NoiseFilter( eqOutput, loopTick );
 
   //  Convert the output of the equalizer by scaling floating point
   xv = float(eqOutput) * INV_FXPT;
@@ -190,22 +192,24 @@ void loop()
 int AlarmCheck( float stdLF, float stdMF, float stdHF)
 {
 
-  /* if (values are all 0 aka the code isnt fuckin running && alarm.isPlaying != true){
-   *    alarm.stop() // stop any existing sound
-   *    alarm.play(sound for failing);
-   *  }
-   *  
-   *  else if (stdLF < less than value for 12 BPM) {
-   *    alarm.stop() // stop any existing sound
-   *    alarm.play(sound for low / high breathing value);
-   *  }
-   *  else if (stdHF > greater than value for 40 BPM){
-   *  
-   *  }
-   *  else{
-   *    alarm.stop()
-   *  }
-  */
+  
+   //if (non operational{
+  // break function & play sound
+  //}
+   if (stdLF < 12) {
+       alarm.stop(); // stop any existing sound
+       alarm.play();
+   }
+   else if ((stdMF > 12) && (stdMF < 40)){
+       alarm.stop(); // stop any existing sound
+       alarm.play();
+   } 
+   else if (stdHF > 40){
+     
+   }
+   else{
+       alarm.stop()
+   }
    
 
 
