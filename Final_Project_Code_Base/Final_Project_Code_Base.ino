@@ -10,6 +10,7 @@
 
 #include <MsTimer2.h>
 #include <SPI.h>
+#include <Tone2.h>
 
 
 const int TSAMP_MSEC = 100;
@@ -44,7 +45,8 @@ struct stats_t
   int tick = 1;
   float mean, var, stdev;
 } statsLF, statsMF, statsHF;
-
+Tone toneT2; 
+Tone toneT1;
 //**********************************************************************
 void setup()
 {
@@ -55,6 +57,9 @@ void setup()
    //Handshake with MATLAB 
   Serial.println(F("%Arduino Ready"));
   while (Serial.read() != 'g'); // spin
+
+  toneT2.begin(13); 
+  toneT1.begin(12);
 
   MsTimer2::set(TSAMP_MSEC, ISR_Sample); // Set sample msec, ISR name
   MsTimer2::start(); // start running the Timer  
@@ -149,9 +154,11 @@ void loop()
 
   //  Call the alarm check function to determine what breathing range 
     alarmCode = AlarmCheck( stdLF, stdMF, stdHF );
+    //printf ("%f \n", alarmCode);
 
   //  Call the alarm function to turn on or off the tone
-  //setAlarm(alarmCode, isToneEn );
+    setAlarm(alarmCode, isToneEn );
+    
 
   
  // To print data to the serial port, use the WriteToSerial function.  
@@ -577,8 +584,30 @@ void setAlarm(int aCode, boolean isToneEn)
 // Your alarm code goes here
 
 // set the tone volume and sound here with Tone2 library
+if(toneT1.isPlaying() == 1){
+  toneT1.stop();
+}
+
+if(aCode = 0){ // Normal Breathing
+  toneT1.stop();
+}
+else if(aCode = 1){// Low Breathing 
+  toneT1.play(400);
+}
+else if(aCode = 2){//High Breathing
+  toneT1.play(1000);
+  delay(1000);
+  toneT1.stop();
+  delay(1000);
+}
+else if(aCode = 3){//intermediate state
+  toneT1.play(200);
+}
+else if(aCode = 4) {//non operational state
+  toneT1.play(200);
+}
     
-} // setBreathRateAlarm()
+} // setAlarm()
 
 //*************************************************************
 float testVector(void)
