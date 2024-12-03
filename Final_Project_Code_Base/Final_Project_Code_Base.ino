@@ -25,6 +25,8 @@ volatile boolean sampleFlag = false;
 const long DATA_FXPT = 1000; // Scale value to convert from float to fixed
 const float INV_FXPT = 1.0 / DATA_FXPT; // division slow: precalculate
 
+int delayCount = 0;
+bool toggle = 0;
 
 int nSmpl = 1, sample;
 
@@ -179,8 +181,10 @@ void loop()
    printArray[6] = stdMF;
    printArray[7] = stdHF;
    printArray[8] = float(alarmCode);
+   printArray[9] = delayCount;
+   printArray[10] = toggle;
 
-   numValues = 9;  // The number of columns to be sent to the serial monitor (or MATLAB)
+   numValues = 11;  // The number of columns to be sent to the serial monitor (or MATLAB)
 
  WriteToSerial( numValues, printArray );  //  Write to the serial monitor (or MATLAB)
 
@@ -197,9 +201,9 @@ void loop()
 int AlarmCheck( float stdLF, float stdMF, float stdHF)
 {
   int alarmCode;
-  int workin = (stdLF + stdMF + stdHF);
+  float workin = (stdLF + stdMF + stdHF);
 
-  if(workin = 0){
+  if(workin == 0){
     //SET Non operational State
     alarmCode = 4;
   }
@@ -584,28 +588,37 @@ void setAlarm(int aCode, boolean isToneEn)
 // Your alarm code goes here
 
 // set the tone volume and sound here with Tone2 library
-if(toneT1.isPlaying() == 1){
-  toneT1.stop();
+if(delayCount == 50){
+  if(toneT1.isPlaying() == 1){
+    toneT1.stop();
+  }
+  delayCount = 0;
+  toggle = !toggle;
 }
 
-if(aCode = 0){ // Normal Breathing
+if(aCode == 0){ // Normal Breathing
   toneT1.stop();
+  delayCount = 0;
 }
-else if(aCode = 1){// Low Breathing 
+else if(aCode == 1){// Low Breathing 
   toneT1.play(400);
+  delayCount = 0;
 }
-else if(aCode = 2){//High Breathing
-  toneT1.play(1000);
-  delay(1000);
-  toneT1.stop();
-  delay(1000);
+else if(aCode == 2){//High Breathing
+  if (toggle == 0){
+    toneT1.play(1000);
+  }
+  delayCount++;
 }
-else if(aCode = 3){//intermediate state
+else if(aCode == 3){//intermediate state
   toneT1.play(200);
+  delayCount = 0;
 }
-else if(aCode = 4) {//non operational state
+else if(aCode == 4) {//non operational state
   toneT1.play(200);
+  delayCount = 0;
 }
+
     
 } // setAlarm()
 
